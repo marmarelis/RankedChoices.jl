@@ -20,6 +20,7 @@
 # not entirely necessary to do this.
 
 using Statistics
+using Distributions
 
 Statistics.mean(mixture::VoterMixture{N,M,T}) where {N,M,T} =
   sum(zip(mixture.cohorts, mixture.shares)) do params
@@ -41,6 +42,19 @@ Statistics.cov(mixture::VoterMixture{N,M,T}) where {N,M,T} =
     end
   end
 
+# I know that this works with two blocks of variables, at least
+# we can simply average this over monte carlo posteriors but NOT mixture components!
+function mutual_information(cohort::VoterCohort{T},
+    blocks::AbstractVector{Int}...)::T where T
+  @assert length(blocks) > 1
+  covariance = cov(cohort)
+  numerator = sum(blocks) do block
+    @view(covariance[block, block]) |> logdet
+  end
+  coverage = vcat(blocks...)
+  @views denominator = covariance[coverage, coverage] |> logdet #logdetcov(cohort)
+  0.5(numerator - denominator)
+end
 
 # set a low quantile to find the "safest" candidate, i.e. most moderately agreeable, least polarizing
 function estimate_quantiles(mixtures::AbstractVector{VoterMixture{N,M,T}},

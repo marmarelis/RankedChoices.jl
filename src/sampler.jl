@@ -13,11 +13,25 @@
 ##  limitations under the License.
 
 using StatsBase
-using StaticArrays
+using StaticArrays # another package to watch is TupleVectors
 using PDMats
 using Distributions
 using LinearAlgebra
 using Random: rand!
+
+draw_cohort(mixture::VoterMixture) =
+  mixture.cohorts[ Categorical(mixture.shares) |> rand ]
+
+function draw_marginal(mixture::VoterMixture{N,M,T}, candidate::Int)::T where {N,M,T}
+  @assert 1 <= candidate <= N
+  cohort = draw_cohort(mixture)
+  means = mean(cohort)
+  covariances = cov(cohort)
+  location = means[candidate]
+  variance = covariances[candidate, candidate]
+  sqrt(variance)*randn() + location
+end
+
 
 function sample_mixture_shares(voters::Vector{VoterRealization{N,M,T}},
     dirichlet_weights::AbstractVector{T})::SVector{M,T} where {N,M,T}
@@ -53,12 +67,15 @@ function sample_mixture_posteriors(voters::Vector{VoterRealization{N,M,T}};
       end
       utility_means = mean(cohort_utilities)
     end
-    precision_prior_scale = precision_scale + (
+    # to be proper, I would actually invert `precision_scale`
+    precision_prior_scale = precision_scale + n_samples*(
       utility_covariance + mean_scale/(mean_scale+n_samples)
-        * (utility_means-mean_loc) * (utility_means-mean_loc)' ) / 2
-    precision_prior_dof = precision_dof + n_samples/2
+        * (utility_means-mean_loc) * (utility_means-mean_loc)' )
+    # alongside that Bayesreg.pdf, see https://en.wikipedia.org/wiki/Normal-Wishart_distribution
+    # it's rather difficult to find reliable sources on this..
+    precision_prior_dof = precision_dof + n_samples
     precision_dist = Wishart(precision_prior_dof,
-      Symmetric(precision_prior_scale) |> cholesky)
+      inv(precision_prior_scale) |> Symmetric |> cholesky) # not the most resourceful sequence of operations?
     precision_sample = rand(precision_dist)
     mean_means = (mean_loc*mean_scale + n_samples*utility_means) / (n_samples+mean_scale)
     covariance_sample = inv(precision_sample)
@@ -76,19 +93,22 @@ end
 # this special case does not lead to any actionable generalization; it falls apart immediately
 # say if R<N or I fill in the fourth entry rather than the fifth.
 function obeys_ranking(utility::Utility{N,T}, # AbstractVector for ranking?
-    ranking::RankedChoice{R}, indif::Bool)::Bool where {N,R,T}
+    ranking::RankedChoice{R}, indif::Bool,
+    interval::UnitRange{Int}=1:N)::Bool where {N,R,T}
   @assert ranking[1] > 0
   # don't take the time to check that all elements are within [1,N]
   seen = @MVector fill(false, N)
+  # passing in a view from the get-go is costlier because the size is dynamic
+  offset = interval.start - 1
   last_index = 1
   @inbounds for rank_index in 2:R # pairwise comparisons down the line
     if ranking[rank_index] == 0
       continue
     end
-    first = ranking[last_index]
-    second = ranking[rank_index]
+    first = ranking[last_index] + offset
+    second = ranking[rank_index] + offset
     #ref_index = min(rank_index-1, R)
-    if utility[second] > utility[first]
+    if utility[second] >= utility[first]
       return false
     end
     seen[first] = seen[second] = true # logically separate these housekeeping lines from the above
@@ -100,62 +120,91 @@ function obeys_ranking(utility::Utility{N,T}, # AbstractVector for ranking?
   end
   last_ranking = ranking[last_index]
   last_ranked = utility[last_ranking]
-  @inbounds for candidate in 1:N
+  @inbounds for candidate in interval
     if seen[candidate]
       continue
     end
-    if utility[candidate] > last_ranked
+    if utility[candidate] >= last_ranked
       return false
     end
   end
   return true
 end # TODO use LoopVectorization.jl here?
 
+function obeys_ranking(utility::Utility{N,T},
+    voter_index::Int, vote::MultiIssueVote, indif::Bool)::Bool where {N,T}
+  offset = 0
+  all(vote) do issue
+    interval = (offset+1) : (offset+issue.n_candidates)
+    offset += issue.n_candidates
+    obeys_ranking(utility, issue.choices[voter_index], indif, interval)
+  end
+end
+
+function check_issues(vote::MultiIssueVote, n_voters::Int, N::Int)
+  @assert all( length(issue.choices) == n_voters for issue in vote )
+  @assert sum( issue.n_candidates for issue in vote ) == N
+end
+
 using Base.Threads
 
 # straight into informed sampling. rejection sampler with variable runtime. sample_ordered_gaussian_mixture()
-function sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
-    choices::Vector{RankedChoice{R}}, mixture::VoterMixture{N,M,T},
-    n_sample_attempts::Int, indif::Bool=false)::Int where {N,M,R,T}
+function rejection_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
+    vote::MultiIssueVote, mixture::VoterMixture{N,M,T},
+    n_sample_attempts::Int, indif::Bool=false)::Int where {N,M,T}
   n_voters = length(voters)
-  @assert length(choices) == n_voters
+  n_issues = length(vote)
   @assert isapprox(sum(mixture.shares), 1)
+  check_issues(vote, n_voters, N)
   categorical = Categorical(mixture.shares) # is it wiser to store `shares` as a `Categorical`?
+  ## the following is what I would do if I were to Gibbs-sample from each
+  ## realization `sub_interval` at a time, conditioning on the rest
+  #outside_interval = vcat(
+  #  1:(sub_interval.start-1), (sub_interval.stop+1):N )
+  #conditional_mean_scales = [
+  #  ( covariance[sub_interval, outside_interval]
+  #    * inv(covariance)[outside_interval, outside_interval] )
+  #  for covariance in cov.(mixture.cohorts) ]
+  #conditional_covariances = [
+  #  invcov(cohort)[sub_interval, sub_interval] |> inv
+  #  for cohort in mixture.cohorts ]
+  #centered_conditional_cohorts = [
+  #  VoterCohort{T}(zeros(T, length(sub_interval)), covariance)
+  #  for covariance in conditional_covariances ]
   n_threads = nthreads()
   sample = zeros(T, N, n_threads) # allocate an array to act as an intermediary in which to store results before assigning to a Vector of SVectors
-  utility = zeros(Utility{N,T}, n_threads)
+  #utility = zeros(Utility{N,T}, n_threads) why did I have this? be careful when removing it (ref: when you see a fence with an unknown purpose...)
   n_failures = zeros(Int, n_threads)
   @threads for voter_index in 1:n_voters
     thread_id = threadid()
     this_sample = @view sample[:, thread_id]
     cohort_index = 0
     n_failures[thread_id] += 1 # this shall be deemed a failure until proven otherwise
+    utility = zero(Utility{N,T})
     @inbounds for attempt in 1:n_sample_attempts # beyond this we simply give up and accept a suboptimal fate
       cohort_index = rand(categorical)
       cohort = mixture.cohorts[cohort_index]
       rand!(cohort, this_sample) # per the docs, the global RNG is thread-safe as of Julia 1.3 (I've been following the development since at least sophomore year!)
-      ranking = choices[voter_index]
-      utility[thread_id] = Utility{N,T}(this_sample)
-      if obeys_ranking(utility[thread_id], ranking, indif) # && break
+      utility = Utility{N,T}(this_sample)
+      offset = 0
+      failed = false
+      for issue in vote # better praxis would be to wrap this into a smaller function..
+        ranking = issue.choices[voter_index]
+        interval = (offset+1):(offset+issue.n_candidates)
+        offset += issue.n_candidates # non-overlapping
+        satisfaction = obeys_ranking(utility, ranking, indif, interval)
+        if !satisfaction # && break
+          failed = true
+          break
+        end # idea: settle on the one with the FEWEST violations? also try to Gibbs sampler on constrained marginals...
+      end
+      if !failed
         n_failures[thread_id] -= 1
         break
-      end # idea: settle on the one with the FEWEST violations? also try to Gibbs sampler on constrained marginals...
+      end
     end
-    realization = VoterRealization{N,M,T}(cohort_index, utility[thread_id])
+    realization = VoterRealization{N,M,T}(cohort_index, utility)
     voters[voter_index] = realization
   end
   sum(n_failures)
-end
-
-draw_cohort(mixture::VoterMixture) =
-  mixture.cohorts[ Categorical(mixture.shares) |> rand ]
-
-function draw_marginal(mixture::VoterMixture{N,M,T}, candidate::Int)::T where {N,M,T}
-  @assert 1 <= candidate <= N
-  cohort = draw_cohort(mixture)
-  means = mean(cohort)
-  covariances = cov(cohort)
-  location = means[candidate]
-  variance = covariances[candidate, candidate]
-  sqrt(variance)*randn() + location
 end

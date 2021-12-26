@@ -18,8 +18,9 @@ using PDMats
 using Distributions
 using LinearAlgebra
 
-# `N` is the number of candidates. `M` is the number of mixtures.
-# `V` is the number of voters. `R` is the size of the ranking (i.e. number of choices.)
+# `N` is the number of candidates, summed up over all issues (should there be more than one issue).
+# `M` is the number of mixtures. `V` is the number of voters.
+# `R` is the size of the ranking (i.e. number of choices.)
 
 ## below, the dangling type parameter `T` would carry over implicitly
 ##const VoterCohort = MvNormal{PDMat, }
@@ -37,6 +38,12 @@ const VoterCohort{T} = MvNormal{T, PDMat{T, Matrix{T}}, Vector{T}}
 # careful introspection revealed that this enabled massive performance gains
 # by stabilizing the types in critical loops
 
+# nice-to-have: enable cohorts to assign values to more than one set of candidates, i.e. question.
+#   instead of sampling for each separately, it would be valuable to force the cohorts to correspond
+#   across the two or more questions. alternatively, find post-hoc couplings between independent samples
+#   my past attempt was to sample realizations for each issue separately, conditioning on other issues' realizations.
+#   how this precisely squares with the cross-issue covariance structure is tenuous.
+#   I have a hunch that it extends, and abides fully with my Gibbs scheme.
 struct VoterMixture{ N, M, T } # all locally and statically allocated
   cohorts :: SVector{M, VoterCohort{T}}
   shares :: SVector{M, T} # must sum to unit. the composition hereof
@@ -49,6 +56,15 @@ end
 const RankedChoice{ R } = SVector{ R, Int } #where { R, T <: Real } rather than RankedChoice{ R, T }
 # better semantics than the implicity of a matrix?
 # strongly typed and explicitly-declared type parameters
+
+struct IssueVote{ R }
+  choices :: Vector{RankedChoice{R}}
+  n_candidates :: Int # all issue `n_candidates` sum to the cohorts' big `N`
+end
+
+# encode in such a way that the entire nested type-structure
+# (e.g. each array's heterogeneous `R`) becomes concrete at runtime
+const MultiIssueVote = Tuple{Vararg{IssueVote}}
 
 const Utility{ N, T } = SVector{ N, T }
 
@@ -69,3 +85,10 @@ Base.zero(::Type{VoterRealization{N,M,T}}) where {N,M,T} =
 function validate_choices(rankings::AbstractVector{RankedChoice{R}}, N::Int)::Bool where R
   all( all( (ranking .>= 1) .& (ranking .<= N) ) for ranking in rankings )
 end
+
+## predictive posterior of these voter realizations
+# for issue A and B:
+# KL(joint(A,B) || single(A) x single(B)) is a sort of mutual information?
+# consider this quantity more deeply.
+# different from just taking one joint and splitting it because we *may*
+# seek to study coupled vs. uncoupled

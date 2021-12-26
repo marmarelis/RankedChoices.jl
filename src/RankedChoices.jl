@@ -12,19 +12,24 @@
 ##  See the License for the specific language governing permissions and
 ##  limitations under the License.
 
-module RankedChoices
+module OptimalVoting
 
 include("structures.jl")
 include("sampler.jl")
+include("hamiltonian-sampler.jl")
+include("clustering.jl")
 include("simulator.jl")
 include("analysis.jl")
 include("other-methods.jl")
 include("parser.jl")
 
 export VoterRealization, VoterCohort, VoterMixture, Membership, Utility, RankedChoice
-export validate_choices, sample_utilities!, sample_mixture_shares, sample_mixture_posterior
-export Prior, make_impartial_prior, simulate
-export normalize_utility, estimate_quantiles
+export IssueVote, MultiIssueVote
+export validate_choices, sample_mixture_shares, sample_mixture_posterior
+export obeys_ranking, shoehorn_ranking
+export rejection_sample_utilities!, hamiltonian_sample_utilities!
+export Prior, make_impartial_prior, simulate, HamiltonianSim, RejectionSim
+export normalize_utility, estimate_quantiles, mutual_information
 export count_simple_plurality, find_instant_runoff_winner, find_condorcet_winner
 export read_prm_file, read_csv, read_xlsx, parse_matrix
 
