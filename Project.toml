@@ -1,7 +1,7 @@
 name = "RankedChoices"
 uuid = "562810e1-8c0d-4830-9cc1-9c323639d9b1"
 authors = ["Myrl <myrl@marmarel.is>"]
-version = "1.0.0"
+version = "0.1.0"
 
 [deps]
 Bootstrap = "e28b5b4c-05e8-5b66-bc03-6f0c0a0a06e0"
