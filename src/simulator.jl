@@ -76,10 +76,15 @@ function simulate_utilities(simulation::HamiltonianSim, status, voters, vote, mi
   (; incompleteness )
 end
 
+# we do marginal (univariate) moments, not covariance and higher-order relations..
+# note that multivariate normal does not carry any information above second order,
+# but the mixture and the predictive posterior could (and almost always do).
+# what if I included rolling quantiles for each voter's utility?
 function simulate(prior::Prior{N,M,T}, simulation::Simulation,
     vote::Union{MultiIssueVote, IssueVote}, n_rounds::Int; seed::Int,
-    n_burnin::Int = 0, indifference::Bool = false, verbose::Bool = false,
-    gc_interval::Int = 0, do_coincident::Bool = true)::NamedTuple where {N,M,T}
+    n_utility_moments::Int = 1, n_burnin::Int = 0, indifference::Bool = false,
+    verbose::Bool = false, gc_interval::Int = 0, do_coincident::Bool = true
+    )::NamedTuple where {N,M,T}
   Random.seed!(seed)
   if vote isa IssueVote
     vote = (vote,) :: MultiIssueVote
@@ -104,6 +109,8 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
       shoehorn_ranking(@SVector(randn(T, N)),
           voter, vote, indifference) )
   end
+  moments = [ zero(Utility{N,T})
+    for m in 1:n_utility_moments, v in 1:n_voters ]
   coincident = ( do_coincident ?
     zeros(Int, n_voters, n_voters) : nothing )
   mixtures = VoterMixture{N,M,T}[]
@@ -114,6 +121,12 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
       voters, vote, mixture, indifference)
     if trial <= n_burnin
       status = nothing # don't count them if still in burnin stage
+    else
+      for v in 1:n_voters
+        for m in 1:n_utility_moments
+          moments[m, v] += voters[v].utility .^ m
+        end
+      end
     end
     shares = sample_mixture_shares(voters, prior.dirichlet_weights)
     cohorts = sample_mixture_posteriors(voters; prior.precision_scale,
@@ -130,5 +143,6 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
     end
   end
   sampled_mixtures = @view mixtures[(1+n_burnin):end]
-  (; mixtures=sampled_mixtures, coincident, sim_status... )
+  moments ./= n_rounds
+  (; mixtures=sampled_mixtures, coincident, moments, sim_status... )
 end
