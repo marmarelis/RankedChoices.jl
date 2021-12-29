@@ -12,7 +12,7 @@
 ##  See the License for the specific language governing permissions and
 ##  limitations under the License.
 
-module OptimalVoting
+module RankedChoices
 
 include("structures.jl")
 include("sampler.jl")
