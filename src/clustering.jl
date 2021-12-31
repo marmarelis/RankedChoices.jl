@@ -29,3 +29,18 @@ function count_coincidences!(coincident::AbstractMatrix{Int}, # can be sparse fo
     end
   end
 end
+
+# our predictive posterior (distribution of voters marginalized over Gibbs samples)
+# no longer has `n_cohorts` distinct components; in fact, it comprises arbitrarily
+# many humps integrated to a smooth surface
+# so, why relabel? also, I disagree philosophically with most methods that use ordinary
+# points as exemplars or anchors for clusters
+
+
+using Clustering
+
+# try MCL, which normalizes automagically, and then maybe Affinity Propagation.
+# or diffusion maps..
+# if we have Likert answers, can we score that against a Markov transition matrix?
+# maybe remove diagonal and then normalize rows to sum to unit, and do a knn-style
+# classifier (not real-valued prediction?)

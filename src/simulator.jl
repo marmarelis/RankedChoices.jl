@@ -24,6 +24,7 @@ import Base.@kwdef
 
 abstract type Simulation end
 
+# more of a tactic than a strategy
 @kwdef struct RejectionSim <: Simulation
   n_sample_attempts :: Int
 end
@@ -127,15 +128,15 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
           moments[m, v] += voters[v].utility .^ m
         end
       end
+      if do_coincident
+        count_coincidences!(coincident, voters)
+      end
     end
     shares = sample_mixture_shares(voters, prior.dirichlet_weights)
     cohorts = sample_mixture_posteriors(voters; prior.precision_scale,
       prior.precision_dof, prior.mean_loc, prior.mean_scale)
     mixture = VoterMixture{N,M,T}(cohorts, shares)
     push!(mixtures, mixture)
-    if do_coincident
-      count_coincidences!(coincident, voters)
-    end
     report = () -> [(:means, mean(mixture))]
     next!(progress, showvalues=report)
     if gc_interval > 0 && trial % gc_interval == 0
