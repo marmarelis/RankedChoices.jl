@@ -1,7 +1,7 @@
 name = "RankedChoices"
 uuid = "562810e1-8c0d-4830-9cc1-9c323639d9b1"
 authors = ["Myrl <myrl@marmarel.is>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [compat]
 julia = "^1.5"

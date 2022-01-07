@@ -47,7 +47,7 @@ function read_prm_file(filename, N, R)
     padded_candidates = vcat(candidates, zeros(Int, R-n_choices))
     push!(rankings, RankedChoice{R}(padded_candidates))
   end
-  rankings
+  IssueVote(rankings, N)
 end
 
 using CSV, DataFrames
@@ -83,7 +83,7 @@ function parse_matrix(matrix::AbstractMatrix{String}, candidates::AbstractVector
   filtered_votes = filter(votes) do vote
     vote[1] != 0 # first entry can't be zero!! todo: ensure all other entries are zero too? if not, we could shift forward...
   end
-  filtered_votes, waste
+  IssueVote(filtered_votes, N), waste
 end
 
 function quantize(items::AbstractVector{S}, keys::AbstractVector{S}) where S

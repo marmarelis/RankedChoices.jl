@@ -16,7 +16,7 @@ Idealistically, our elections should run on this kind of algorithm. See this [bl
 ## Interface
 Here I detail how to parse rankings, handle the Gibbs sampler, and interpret the results. For instance,
 ```julia
-# (n_participants x ranking_size)
+# (n_respondents x ranking_size)
 rankings = [
   "B" "C" "D";
   "A" "D" "C";
@@ -65,4 +65,27 @@ Two simulation tactics are exposed: `RejectionSim` and `HamiltonianSim`. The ori
 The snazzy `HamiltonianSim(n_trajectories::Int, collision_limit::Int)` is much more complex, but converges quickly even on large rankings. You can set parameter `n_trajectories := 1` if you don't mind consecutive samples being correlated. Additionally, `collision_limit` can be set to a relatively high number like `128`. It determines how many times a ball can bounce between the walls of a linearly constrained Gaussian before we give up early.
 
 
-More details on the core methods coming (very) soon.
+### Conjugate Priors
+My sampler is Bayesian, and takes advantage of a number of conjugate priors. We typically seek to treat all cohorts and respondents equally a priori. Hence, I expose a method
+```julia
+prior = make_impartial_prior(n_total_candidates, n_cohorts;
+  precision_scale, precision_dof, mean_scale, dirichlet_weight)
+```
+where...
+* `precision_scale`, usually around or above unit, scales the diagonal matrix that parametrizes a Wishart prior for the precision matrix.
+* `precision_dof` sets the strength of the Wishart prior for influencing precision matrices.
+* `mean_scale`, which can stay unit, constrains the spread of the multivariate cohort means. In particular, it determines how much less the mean is spread out compared to the spread of the actual utilities.
+* `dirichlet_weight`, typically greater than unit, determines how strongly to favor cohorts of equal proportion
+
+
+### Sampler
+
+```julia
+result = simulate(prior, simulation, votes, n_trials;
+  n_burnin, seed, indifference=false, verbose=false)
+```
+
+The boolean flag `indifference` tells the sampler whether to treat incomplete rankings as implying that all unlisted candidates are lower than those listed (`indifference := false`) or not (`indifference := true`).
+
+
+More details on the core methods coming soon.
