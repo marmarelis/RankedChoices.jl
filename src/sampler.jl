@@ -101,6 +101,7 @@ function obeys_ranking(utility::Utility{N,T}, # AbstractVector for ranking?
   # passing in a view from the get-go is costlier because the size is dynamic
   offset = interval.start - 1
   last_index = 1
+  seen[ranking[1] + offset] = true # first item is always seen
   @inbounds for rank_index in 2:R # pairwise comparisons down the line
     if ranking[rank_index] == 0
       continue

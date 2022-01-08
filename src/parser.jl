@@ -14,6 +14,22 @@
 
 #using Automa -- for a fast state-machine compiler
 
+function Base.vcat(issues::IssueVote{R}...)::IssueVote{R} where R
+  choices = reduce(vcat, (issue.choices for issue in issues))
+  n_candidates = issues[1].n_candidates
+  @assert all( n_candidates == issue.n_candidates for issue in issues )
+  IssueVote(choices, n_candidates)
+end
+
+function Base.filter(f::Function, issue::IssueVote{R})::IssueVote{R} where R
+  IssueVote(filter(f, issue.choices), issue.n_candidates)
+end
+
+# generated functions to automatically wrap and unwrap?
+function Base.map(f::Function, issue::IssueVote{R})::IssueVote where R
+  IssueVote(map(f, issue.choices), issue.n_candidates)
+end
+
 function read_prm_file(filename, N, R)
   rankings = RankedChoice{R}[]
   for line in eachline(filename)

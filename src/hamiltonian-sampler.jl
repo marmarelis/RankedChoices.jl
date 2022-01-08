@@ -125,6 +125,7 @@ function build_walls(::Val{N}, voter_index::Int, vote::MultiIssueVote,
     n_ranked = length(ranking)
     @assert ranking[1] > 0
     last_ranking = ranking[1]
+    seen[last_ranking + offset] = true # in case the below iterand skips entirely
     for constraint in 2:n_ranked
       if ranking[constraint] == 0
         continue
