@@ -78,10 +78,10 @@ function sample_mixture_posteriors(voters::Vector{VoterRealization{N,M,T}};
       inv(precision_prior_scale) |> Symmetric |> cholesky) # not the most resourceful sequence of operations?
     precision_sample = rand(precision_dist)
     mean_means = (mean_loc*mean_scale + n_samples*utility_means) / (n_samples+mean_scale)
-    covariance_sample = inv(precision_sample)
+    covariance_sample = convert.(T, inv(precision_sample))
     mean_covariance = covariance_sample / (n_samples+mean_scale)
     mean_dist = MvNormal(mean_means, Symmetric(mean_covariance)) # Hermitian simply to counter numerical instability post-inversion
-    mean_sample = rand(mean_dist)
+    mean_sample = convert.(T, rand(mean_dist))
     MvNormal(mean_sample, Symmetric(covariance_sample))
   end for cohort in 1:M )
 end

@@ -89,6 +89,9 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
   Random.seed!(seed)
   if vote isa IssueVote
     vote = (vote,) :: MultiIssueVote
+  end # sanitize.(vote.choices, vote.n_candidates) would have been fabulous syntax
+  vote = map(vote) do issue
+    map(choice -> sanitize(choice, issue.n_candidates), issue)
   end
   n_total_rounds = n_rounds + n_burnin
   initial_cohorts = sample_mixture_posteriors(VoterRealization{N,M,T}[];

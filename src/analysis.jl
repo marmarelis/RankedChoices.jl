@@ -19,6 +19,20 @@
 # Metrics that are functions of the covariances can be examined later. It is also
 # not entirely necessary to do this.
 
+function sample_possible_rankings(mixtures::AbstractVector{VoterMixture{N,M,T}},
+    ::Val{R}, sample_size::Int)::Vector{RankedChoice{R}} where {R,N,M,T}
+  utility = zeros(T, N)
+  ranking = zeros(Int, N)
+  map(1:sample_size) do i
+    mixture = sample(mixtures)
+    cohort = draw_cohort(mixture)
+    rand!(cohort, utility)
+    sortperm!(ranking, utility, order=Base.Reverse)
+    convert(RankedChoice{R}, @view ranking[1:R])
+  end
+end
+
+
 using Statistics
 using Distributions
 

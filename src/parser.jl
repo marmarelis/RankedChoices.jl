@@ -14,6 +14,24 @@
 
 #using Automa -- for a fast state-machine compiler
 
+# remove duplicate entries, favoring earlier ones
+function sanitize(choice::RankedChoice{R},
+    n_candidates::Int)::RankedChoice{R} where R
+  counts = @MVector zeros(Int, n_candidates)
+  updated = MVector(choice)
+  for r in 1:R
+    c = choice[r]
+    if c == 0
+      continue
+    end
+    if counts[c] >= 1
+      updated[r] = 0
+    end
+    counts[c] += 1
+  end
+  convert(SVector, updated)
+end
+
 function Base.vcat(issues::IssueVote{R}...)::IssueVote{R} where R
   choices = reduce(vcat, (issue.choices for issue in issues))
   n_candidates = issues[1].n_candidates
@@ -70,7 +88,7 @@ using CSV, DataFrames
 
 function read_csv(filename::String, candidates::AbstractVector{String})
   matrix = CSV.read(filename, DataFrame, header=false) |> Matrix
-  parse_matrix(matrix, candidates)
+  parse_matrix(convert.(String, matrix), candidates)
 end
 
 using XLSX
@@ -85,7 +103,8 @@ function read_xlsx(filename::String, candidates::AbstractVector{String};
   parse_matrix(converted_matrix, candidates)
 end
 
-function parse_matrix(matrix::AbstractMatrix{String}, candidates::AbstractVector{String})
+function parse_matrix(matrix::AbstractMatrix{S},
+    candidates::AbstractVector{S}) where S <: AbstractString
   N = length(candidates)
   V, R = size(matrix)
   waste = Set{String}()

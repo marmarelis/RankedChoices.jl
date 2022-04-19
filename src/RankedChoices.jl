@@ -22,6 +22,7 @@ include("simulator.jl")
 include("analysis.jl")
 include("other-methods.jl")
 include("parser.jl")
+include("scrambler.jl")
 
 export VoterRealization, VoterCohort, VoterMixture, Membership, Utility, RankedChoice
 export IssueVote, MultiIssueVote
@@ -31,6 +32,7 @@ export rejection_sample_utilities!, hamiltonian_sample_utilities!
 export Prior, make_impartial_prior, simulate, HamiltonianSim, RejectionSim
 export normalize_utility, estimate_quantiles, mutual_information
 export count_simple_plurality, find_instant_runoff_winner, find_condorcet_winner
-export read_prm_file, read_csv, read_xlsx, parse_matrix
+export read_prm_file, read_csv, read_xlsx, parse_matrix, sanitize
+export scramble_latent_utilities, sample_possible_rankings
 
 end # module
