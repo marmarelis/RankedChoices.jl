@@ -58,7 +58,7 @@ end
 # fully deterministic..
 function simulate_particle_trajectory!(sample::AbstractVector{T},
     utility::Utility{N,T}, mean_utility::SVector{N,T}, inv_cov::SMatrix{N,N,T,L}, # `inv_cov` for this mixture component
-    cohort::VoterCohort{T}, walls::SMatrix{N,N,Int,L}, remaining_time::T,
+    cohort::VoterCohort{N,T,L}, walls::SMatrix{N,N,Int,L}, remaining_time::T,
     collision_limit::Int, small_gap::T=T(1e-5))::Tuple{Utility{N,T}, T} where {N,T,L}
   rand!(cohort, sample) # ^ needs to be like 1e-2 for Float32, although said type appears to be slower for some reason... (casting at runtime?)
   velocity = SVector{N,T}(sample) .- mean_utility

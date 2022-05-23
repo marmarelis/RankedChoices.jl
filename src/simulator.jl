@@ -86,6 +86,7 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
     n_utility_moments::Int = 1, n_burnin::Int = 0, indifference::Bool = false,
     verbose::Bool = false, gc_interval::Int = 0, do_coincident::Bool = true
     )::NamedTuple where {N,M,T}
+  L = N * N
   Random.seed!(seed)
   if vote isa IssueVote
     vote = (vote,) :: MultiIssueVote
@@ -97,7 +98,7 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
   initial_cohorts = sample_mixture_posteriors(VoterRealization{N,M,T}[];
     prior.precision_scale, prior.precision_dof, prior.mean_loc, prior.mean_scale)
   initial_shares = rand(prior.dirichlet_weights|>Dirichlet) #fill(one(T)/M, M)
-  mixture = VoterMixture{N,M,T}(initial_cohorts, initial_shares)
+  mixture = VoterMixture{N,M,T,L}(initial_cohorts, initial_shares)
   n_voters = length(vote[1].choices)
   voters = map(1:n_voters) do voter
     VoterRealization{N,M,T}(
@@ -138,7 +139,7 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
     shares = sample_mixture_shares(voters, prior.dirichlet_weights)
     cohorts = sample_mixture_posteriors(voters; prior.precision_scale,
       prior.precision_dof, prior.mean_loc, prior.mean_scale)
-    mixture = VoterMixture{N,M,T}(cohorts, shares)
+    mixture = VoterMixture{N,M,T,L}(cohorts, shares)
     push!(mixtures, mixture)
     report = () -> [(:means, mean(mixture))]
     next!(progress, showvalues=report)

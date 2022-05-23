@@ -34,38 +34,63 @@ end
 
 
 function sample_mixture_shares(voters::Vector{VoterRealization{N,M,T}},
-    dirichlet_weights::AbstractVector{T})::SVector{M,T} where {N,M,T}
+    dirichlet_weights::AbstractVector{T}, voter_weights::Vector{T}=T[]
+    )::SVector{M,T} where {N,M,T}
+  n_voters = length(voters)
+  @assert length(voter_weights) in (0, n_voters)
   @assert length(dirichlet_weights) == M
-  count_map = countmap(voter.membership for voter in voters)
-  counts = SVector{M,T}(get(count_map, cohort, 0) for cohort in 1:M)
+  counts = @MVector zeros(T, M)
+  for (voter_index, voter) in enumerate(voters)
+    cohort = voter.membership
+    weight = T(1)
+    if length(voter_weights) > 0
+      weight = voter_weights[voter_index]
+    end
+    counts[cohort] += weight
+  end
+  #count_map = countmap(voter.membership for voter in voters)
+  #counts = SVector{M,T}(get(count_map, cohort, 0) for cohort in 1:M)
   posterior_weights = counts + dirichlet_weights
   Dirichlet(posterior_weights) |> rand
 end
 
-# if we were to add weights to voters in order to virtually increase the
-# sample size without expanding the spread, like for elections with more
-# powerful individuals than others (ahem, shareholder meetings) then we
-# would make weighted estimates of the covariance and means here.
-# everything else can mostly stay the same?
-# care more about the few allocations (in number of candidates) happening here?
+function weighted_mean(f::Function, iterand, weights)
+  sum(zip(iterand, weights)) do (value, weight)
+    weight * f(value)
+  end / sum(weights)
+end
+
+# eventually, the best way to improve performance would be to avoid the gradual
+# memory fragmentation due to many small matrix allocations. the "purest" approach
+# would be to get rid of the crutch that is our dependency on `MvNormal` algotegher.
+# retrofit the library procedures entirely in terms of static matrices.
+# first step: relieve most of the memory burden/footprint via the persistent objects.
 function sample_mixture_posteriors(voters::Vector{VoterRealization{N,M,T}};
     precision_scale::AbstractPDMat{T}, precision_dof::T, mean_loc::AbstractVector{T},
-    mean_scale::T)::SVector{M,VoterCohort{T}} where {N,M,T}
+    mean_scale::T, voter_weights::Vector{T}=T[])::SVector{M} where {N,M,T} # VC<:VoterCohort{N,T}
+  n_voters = length(voters) # weight for recency (online prediction) or inverse propensity scoring to adjust for bias
+  @assert length(voter_weights) in (0, n_voters)
   SVector{M}( begin
-    cohort_voters = Iterators.filter(voters) do voter
-      voter.membership == cohort
+    cohort_voter_indices = Iterators.filter(1:n_voters) do voter_index
+      voters[voter_index].membership == cohort
+    end
+    cohort_voters = (voters[voter_index] for voter_index in cohort_voter_indices)
+    cohort_weights = Iterators.map(cohort_voter_indices) do voter_index
+      length(voter_weights) > 0 ? voter_weights[voter_index] : T(1)
     end
     cohort_utilities = (voter.utility for voter in cohort_voters)
-    n_samples = sum(_ -> 1, cohort_utilities, init=0)
+    n_samples = sum(cohort_weights, init=T(0))
     utility_covariance = zero(SMatrix{N,N,T,N*N})
     utility_means = SVector{N,T}(mean_loc)
     #error("what to do with an empty cohort?")
     #make it draw from the prior, basically
     if n_samples > 0
-      utility_covariance = mean(cohort_utilities) do utility
+      utility_covariance = weighted_mean(
+          cohort_utilities, cohort_weights) do utility
         utility * utility'
       end
-      utility_means = mean(cohort_utilities)
+      utility_means = weighted_mean(identity,
+        cohort_utilities, cohort_weights)
     end
     # to be proper, I would actually invert `precision_scale`
     precision_prior_scale = precision_scale + n_samples*(
@@ -76,13 +101,14 @@ function sample_mixture_posteriors(voters::Vector{VoterRealization{N,M,T}};
     precision_prior_dof = precision_dof + n_samples
     precision_dist = Wishart(precision_prior_dof,
       inv(precision_prior_scale) |> Symmetric |> cholesky) # not the most resourceful sequence of operations?
-    precision_sample = rand(precision_dist)
+    precision_sample = rand(precision_dist) .|> T
+    covariance_sample = inv(precision_sample)
     mean_means = (mean_loc*mean_scale + n_samples*utility_means) / (n_samples+mean_scale)
-    covariance_sample = convert.(T, inv(precision_sample))
     mean_covariance = covariance_sample / (n_samples+mean_scale)
     mean_dist = MvNormal(mean_means, Symmetric(mean_covariance)) # Hermitian simply to counter numerical instability post-inversion
-    mean_sample = convert.(T, rand(mean_dist))
-    MvNormal(mean_sample, Symmetric(covariance_sample))
+    mean_sample = rand(mean_dist) |> SVector{N,T}
+    covariance_decomp = cholesky(covariance_sample |> SMatrix{N,N,T,N*N} |> Symmetric)
+    MvNormal(mean_sample, PDMat(covariance_decomp))
   end for cohort in 1:M )
 end
 

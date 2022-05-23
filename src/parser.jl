@@ -136,16 +136,10 @@ function quantize(items::AbstractVector{S}, keys::AbstractVector{S}) where S
 end
 
 # empty strings count as nothing
-function parse_matrix(matrix::AbstractMatrix{String})
+function parse_matrix(matrix::AbstractMatrix{S}) where S <: AbstractString
   candidates = filter(!isempty, unique(matrix)) # `!` operator creates a closure on the function automagically!
   sort!(candidates)
   votes, waste = parse_matrix(matrix, candidates)
   # (candidates, parse_matrix(matrix, candidates)...)
   votes, candidates
 end
-
-# https://www.football-data.co.uk/englandm.php
-# for the English Premier League, I had the following:
-#  matches=hcat([(league[i, 8] == "H" ? league[i, 4:5] : (league[i, 8] == "A" ? league[i, [5,4]] : ["",""])) for i in 1:380]...)|>Matrix{String}|>permutedims
-# victories, teams = parse_matrix(matches)
-# however, I had no way to mark (feign!) indifference for the teams that are omitted from every pairwise comparison..

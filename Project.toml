@@ -1,13 +1,13 @@
 name = "RankedChoices"
 uuid = "562810e1-8c0d-4830-9cc1-9c323639d9b1"
 authors = ["Myrl <myrl@marmarel.is>"]
-version = "0.1.1"
+version = "0.2.0"
 
 [compat]
 julia = "^1.5"
-Bootstrap = "2"
 CSV = "0.9"
 Clustering = "0.14"
+Conda = "1"
 DataFrames = "1"
 Distributions = "0.25"
 PDMats = "0.11"
@@ -19,9 +19,9 @@ StatsFuns = "0.9"
 XLSX = "0.7"
 
 [deps]
-Bootstrap = "e28b5b4c-05e8-5b66-bc03-6f0c0a0a06e0"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 Clustering = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
+Conda = "8f4d0f93-b110-5947-807f-2305c1781a2d"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"

@@ -19,22 +19,34 @@
 # Metrics that are functions of the covariances can be examined later. It is also
 # not entirely necessary to do this.
 
-function sample_possible_rankings(mixtures::AbstractVector{VoterMixture{N,M,T}},
-    ::Val{R}, sample_size::Int)::Vector{RankedChoice{R}} where {R,N,M,T}
+function sample_possible_rankings(mixtures::AbstractVector{V},
+    ::Val{R}, sample_size::Int) where {R,N,M,T,V<:VoterMixture{N,M,T}}
   utility = zeros(T, N)
   ranking = zeros(Int, N)
-  map(1:sample_size) do i
+  memberships = zeros(Int, sample_size)
+  choices = map(1:sample_size) do i
     mixture = sample(mixtures)
-    cohort = draw_cohort(mixture)
+    membership = Categorical(mixture.shares) |> rand
+    memberships[i] = membership
+    cohort = mixture.cohorts[membership]
     rand!(cohort, utility)
     sortperm!(ranking, utility, order=Base.Reverse)
     convert(RankedChoice{R}, @view ranking[1:R])
+  end
+  IssueVote{R}(choices, N), memberships
+end
+
+function bootstrap_statistic(statistic::Function, mixtures::AbstractVector{V};
+    sample_size::Int = length(mixtures)) where {V<:VoterMixture}
+  mean(1:sample_size) do _
+    sample(mixtures) |> statistic
   end
 end
 
 
 using Statistics
 using Distributions
+using StatsFuns
 
 Statistics.mean(mixture::VoterMixture{N,M,T}) where {N,M,T} =
   sum(zip(mixture.cohorts, mixture.shares)) do params
@@ -48,6 +60,7 @@ Statistics.cov(mixture::VoterMixture{N,M,T}) where {N,M,T} =
   let mixture_means = mean(mixture)
     sum(zip(mixture.cohorts, mixture.shares)) do params
       cohort, share = params
+      # these are effectively no-ops with the current data structures in place
       means = convert(SVector{N,T}, mean(cohort))
       covariance = convert(SMatrix{N,N,T}, cov(cohort))
       displacement = means - mixture_means # how much off-center
@@ -55,6 +68,25 @@ Statistics.cov(mixture::VoterMixture{N,M,T}) where {N,M,T} =
       cohort_cov .* share
     end
   end
+
+# normalize PER MCMC draw to remove drift!
+# fix the normalization function further below for a more general scale/shift correction?
+Statistics.cor(mixture::VoterMixture{N,M,T}) where {N,M,T} =
+  let covariance = cov(mixture)
+    covariance ./ sqrt.(diag(covariance) * diag(covariance)')
+  end
+
+# probability of pairwise event (utlity[i] > utility[j]) --- equality has infinitesimal
+function contest_probability(mixture::VoterMixture, i::Int, j::Int; log::Bool=false)
+  means = mean(mixture)
+  covariances = cov(mixture)
+  diff_mean = means[i] - means[j]
+  first_var = covariances[i, i]
+  second_var = covariances[j, j] # slightly inclined to spell as "secnd" for alignment
+  covariance = covariances[i, j]
+  deviation = sqrt( first_var + second_var - 2covariance )
+  (log ? normlogcdf : normcdf)( diff_mean / deviation ) # locally consistent styling..
+end
 
 # I know that this works with two blocks of variables, at least
 # we can simply average this over monte carlo posteriors but NOT mixture components!
@@ -71,8 +103,8 @@ function mutual_information(cohort::VoterCohort{T},
 end
 
 # set a low quantile to find the "safest" candidate, i.e. most moderately agreeable, least polarizing
-function estimate_quantiles(mixtures::AbstractVector{VoterMixture{N,M,T}},
-    portion::Union{Vector{T},T}, n_draws::Y)::AbstractVector{Utility{N,T}} where {N,M,T,Y<:Real}
+function estimate_quantiles(mixtures::AbstractVector{V}, portion::Union{Vector{T},T},
+    n_draws::Y)::AbstractVector{Utility{N,T}} where {N,T,Y<:Real,V<:VoterMixture}
   n_quantiles = length(portion)
   quantiles = zeros(T, N, n_quantiles) # align for reinterpretation, even though quantile! will have to skip around
   for candidate in 1:N
