@@ -27,11 +27,6 @@ using LinearAlgebra
 ## arguments .. (no "dependent types"). can't just omit the type because that would make it
 ## dynamically resolved for every instance..
 
-## if `matrix` is an SMatrix, no new allocations (should) occur
-#Base.convert(::Type{PDMat{T,SMatrix{N,N,T,L}}}, matrix::AbstractMatrix{T}) where {N,T,L} =
-#  PDMat{T,SMatrix{N,N,T,L}}(N, matrix, cholesky(matrix)) # assert L == N*N?
-# these things graduated to the level of a massive pain...
-
 const VoterCohort{ N, T, L } =
   MvNormal{ T, PDMat{ T, SMatrix{ N, N, T, L } }, SVector{ N, T } }
 # ^ allow structures and functions that operate thereupon to fully specialize
@@ -88,6 +83,11 @@ end
 
 # the shipped inv(::PDMat) is broken for SMatrices (that are not ::StridedVecOrMat)
 Distributions.invcov(cohort::VoterCohort) = cohort.Σ.chol |> inv
+
+## if `matrix` is an SMatrix, no new allocations (should) occur
+Base.convert(::Type{PDMat{T,SMatrix{N,N,T,L}}}, matrix::AbstractMatrix{T}) where {N,T,L} =
+  PDMat{T,SMatrix{N,N,T,L}}(N, matrix, cholesky(matrix))
+# these things graduated to the level of a massive pain...
 
 ## predictive posterior of these voter realizations
 # for issue A and B:

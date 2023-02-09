@@ -13,8 +13,6 @@
 ##  limitations under the License.
 
 
-## embedding stuff taken from my IntrinsicGeometry.jl package
-
 function reduce_to_principal_components(data::AbstractMatrix{<:Real}, n_dims::Int)
   eigval, eigvec = data' |> cov |> Hermitian |> eigen
   means = mean(data, dims=2)
@@ -104,7 +102,7 @@ function find_knee(x::AbstractVector{T}, y::AbstractVector{T})::T where T <: Rea
 end
 
 function estimate_von_neumann_entropy(eigval::AbstractVector{T})::T where T <: Real
-  positive_eigval = eigval[eigval .> 0]
+  positive_eigval = eigval[eigval .> 0] # to avoid log(0)
   normalizer = sum(positive_eigval)
   probabilities = positive_eigval / normalizer
   pointwise_entropies = -probabilities .* log.(probabilities)
@@ -116,7 +114,7 @@ function optimize_von_neumann_entropy(eigval::Vector{T},
   n_powers = length(powers)
   x, y = zeros(T, n_powers), zeros(T, n_powers)
   for (i, t) in enumerate(powers)
-    step_eigval = eigval.^t
+    step_eigval = max.(eigval, 0) .^ t
     entropy = estimate_von_neumann_entropy(step_eigval)
     x[i] = t
     y[i] = entropy
@@ -142,6 +140,7 @@ function embed_diffusion(diffusion::Matrix{T}, n_manifold_dims::Int;
     @info "Taking $n_steps diffusion steps."
   end
   distances = compute_potential_distances(
-    transition ^ n_steps |> real)
-  perform_metric_mds(distances, n_manifold_dims)
+    transition ^ n_steps |> real .|> T)
+  mds = perform_metric_mds(distances, n_manifold_dims)
+  reduce_to_principal_components(mds', n_manifold_dims).reduced
 end

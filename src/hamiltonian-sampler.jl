@@ -40,13 +40,19 @@ using StatsFuns
 # p(membership|utility) = p(membership) * p(utility|membership) / (sum over possible memberships)
 # used for sampling the mixture, not any parameter posterior.
 # this sampler could have trouble mixing if cohort spreads are not wide enough (via large precision_scale and dof?)
+# entropy-regularize? (annealed relaxation by geometric mixture with wider distribution)? mix prior and posterior!
 function sample_realization_membership(utility::Utility{N,T},
-    mixture::VoterMixture{N,M,T})::Int where {N,M,T}
+    mixture::VoterMixture{N,M,T}, relaxation::T)::Int where {N,M,T}
+  @assert 0 <= relaxation <= 1
   log_prior = log.(mixture.shares)
   log_likelihood = SVector{M}( logpdf(cohort, utility)
     for cohort in mixture.cohorts )
   energy = log_prior + log_likelihood
-  log_probability = energy .- logsumexp(energy) # for numerical stability?
+  log_posterior = energy .- logsumexp(energy) # for numerical stability?
+  log_regularized = ( # first we normalize away the strength of the likelihood, and then we mix
+           relaxation .* log_prior
+    .+ (1-relaxation) .* log_posterior )
+  log_probability = log_regularized .- logsumexp(log_regularized)
   exp.(log_probability) |> Categorical |> rand
 end
 
@@ -160,7 +166,7 @@ end
 # walls do not couple different issues on an absolute scale, so it is important to
 # restrain the means by having a large `mean_scale`.
 function hamiltonian_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
-    vote::MultiIssueVote, mixture::VoterMixture{N,M,T},
+    vote::MultiIssueVote, mixture::VoterMixture{N,M,T}, relaxation::T,
     n_trajectories::Int, collision_limit::Int, indif::Bool=false) where {N,M,T}
   trajectory_length = pi/2 |> T
   n_voters = length(voters)
@@ -170,9 +176,10 @@ function hamiltonian_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
   # `inv(cohort.Σ)` does preserve PDMat structure
   inv_covs = [ invcov(cohort) |> SMatrix{N,N,T} for cohort in mixture.cohorts ] # all this comprehension *could* be an @SVector
   n_threads = nthreads()
+  transitions = @MMatrix zeros(Int, M, M)
   sample = zeros(T, N, n_threads) # intermediary for initial velocity
   incompletenesses = zeros(T, n_threads)
-  @threads for voter_index in 1:n_voters
+  @threads :static for voter_index in 1:n_voters
     walls = build_walls(Val(N), voter_index, vote, indif)
     thread_id = threadid()
     this_sample = @view sample[:, thread_id]
@@ -185,7 +192,9 @@ function hamiltonian_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
       utility, leftover_time = simulate_particle_trajectory!(this_sample,
         utility, cohort_mean, inv_covs[membership], cohort, walls,
         trajectory_length, collision_limit) # as prescribed by the paper
-      membership = sample_realization_membership(utility, mixture)
+      old_membership = membership
+      membership = sample_realization_membership(utility, mixture, relaxation)
+      transitions[old_membership, membership] += 1
       incompleteness = leftover_time / trajectory_length # aggregate and average these..
       incompletenesses[thread_id] += incompleteness
     end
@@ -193,7 +202,7 @@ function hamiltonian_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
     voters[voter_index] = realization
   end
   incompleteness = sum(incompletenesses) / (n_trajectories * n_voters)
-  incompleteness
+  incompleteness, transitions
 end
 
 using Random: shuffle!

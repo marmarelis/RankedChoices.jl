@@ -32,6 +32,8 @@ end
 @kwdef struct HamiltonianSim <: Simulation
   n_trajectories :: Int
   collision_limit :: Int
+  relaxation :: Float64 # for cohort mixing. this should lessen the burden for a strong Dirichlet prior.
+  anneal_rate :: Float64
 end
 
 # we shall also use the prior to draw an initial estimate/guess
@@ -49,13 +51,24 @@ function make_impartial_prior(N::Int, M::Int;
     precision_scale::T, precision_dof::T, mean_scale::T,
     dirichlet_weight::T) where T
   Prior{N,M,T}(
-    precision_scale = PDMat(fill(precision_scale, N) |> Diagonal |> Matrix),
+    precision_scale = PDMat(I(N) * precision_scale |> Matrix),
     mean_loc = fill(zero(T), N),
     dirichlet_weights = fill(dirichlet_weight, M);
     precision_dof, mean_scale)
 end
 
-function simulate_utilities(simulation::RejectionSim, status, voters, vote, mixture, indifference)
+# guidelines should rest on proportions of the sample size, at least
+make_impartial_prior(n::Int, N::Int, M::Int;
+    precision_dof::T, mean_scale::T,
+    dirichlet_weight::T ) where T =
+  make_impartial_prior(N, M;
+    precision_scale=T(1),
+    precision_dof=n*precision_dof,
+    mean_scale=n*mean_scale,
+    dirichlet_weight=n*dirichlet_weight)
+
+function simulate_utilities(simulation::RejectionSim,
+    status, voters, vote, mixture, indifference, stage)
   n_local_failures = rejection_sample_utilities!(
     voters, vote, mixture, simulation.n_sample_attempts, indifference)
   n_failures = ( status === nothing ?
@@ -64,17 +77,25 @@ function simulate_utilities(simulation::RejectionSim, status, voters, vote, mixt
 end
 
 # should be more than reasonable for Julia to infer fully concrete types here
-function simulate_utilities(simulation::HamiltonianSim, status, voters, vote, mixture, indifference)
+function simulate_utilities(simulation::HamiltonianSim,
+    status, voters, vote, mixture::VoterMixture{N,M,T}, indifference, stage) where {N,M,T}
   for (voter_index, voter) in enumerate(voters)
     @assert( obeys_ranking(voter.utility, voter_index, vote, indifference), # disable for high-performance sessions?
       "ranking violated: $voter, $voter_index" )
   end
-  local_incompleteness = hamiltonian_sample_utilities!(
-    voters, vote, mixture, simulation.n_trajectories,
-    simulation.collision_limit, indifference)
+  # avoid weird 0^0=1 edge case
+  relaxation = simulation.relaxation == 0 ? T(0) : T(
+    simulation.relaxation * (1-stage) ^ simulation.anneal_rate )
+  # local_transitinos hitherto unused but may be a useful statistic
+  local_incompleteness, local_transitions = hamiltonian_sample_utilities!(
+    voters, vote, mixture, relaxation,
+    simulation.n_trajectories, simulation.collision_limit, indifference)
+  local_sources = sum(local_transitions, dims=1)[1, :]
+  # like a Metropolis-Hastings rejection rate, we want this to be controlled
+  stay_probabilities = diag(local_transitions) ./ local_sources
   incompleteness = ( status === nothing ?
     local_incompleteness : (status.incompleteness + local_incompleteness) )
-  (; incompleteness )
+  (; incompleteness, stay_probabilities )
 end
 
 # we do marginal (univariate) moments, not covariance and higher-order relations..
@@ -122,8 +143,9 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
   sim_status = nothing
   progress = Progress(n_total_rounds, enabled=verbose)
   for trial in 1:n_total_rounds
+    stage = trial / n_total_rounds
     sim_status = simulate_utilities(simulation, sim_status,
-      voters, vote, mixture, indifference)
+      voters, vote, mixture, indifference, stage)
     if trial <= n_burnin
       status = nothing # don't count them if still in burnin stage
     else
@@ -141,7 +163,11 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
       prior.precision_dof, prior.mean_loc, prior.mean_scale)
     mixture = VoterMixture{N,M,T,L}(cohorts, shares)
     push!(mixtures, mixture)
-    report = () -> [(:means, mean(mixture))]
+    report = () -> [
+      (:shares, shares .|> Float16),
+      (:means, mean(mixture) .|> Float16),
+      (:spreads, cov(mixture) |> diag .|> sqrt .|> Float16),
+      (:state, sim_status) ]
     next!(progress, showvalues=report)
     if gc_interval > 0 && trial % gc_interval == 0
       GC.gc(true) # full round to reorganize memory and avoid continuous swapping from fragmented objects in virtual memory?

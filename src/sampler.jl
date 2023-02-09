@@ -93,12 +93,13 @@ function sample_mixture_posteriors(voters::Vector{VoterRealization{N,M,T}};
         cohort_utilities, cohort_weights)
     end
     # to be proper, I would actually invert `precision_scale`
-    precision_prior_scale = precision_scale + n_samples*(
+    # see arXiv:2109.07384 for how we use `precision_dof` (the `alpha` therein)
+    precision_prior_scale = precision_dof*precision_scale + n_samples*(
       utility_covariance + mean_scale/(mean_scale+n_samples)
         * (utility_means-mean_loc) * (utility_means-mean_loc)' )
     # alongside that Bayesreg.pdf, see https://en.wikipedia.org/wiki/Normal-Wishart_distribution
     # it's rather difficult to find reliable sources on this..
-    precision_prior_dof = precision_dof + n_samples
+    precision_prior_dof = (precision_dof + N + 1) + n_samples
     precision_dist = Wishart(precision_prior_dof,
       inv(precision_prior_scale) |> Symmetric |> cholesky) # not the most resourceful sequence of operations?
     precision_sample = rand(precision_dist) .|> T
@@ -202,7 +203,7 @@ function rejection_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
   sample = zeros(T, N, n_threads) # allocate an array to act as an intermediary in which to store results before assigning to a Vector of SVectors
   #utility = zeros(Utility{N,T}, n_threads) why did I have this? be careful when removing it (ref: when you see a fence with an unknown purpose...)
   n_failures = zeros(Int, n_threads)
-  @threads for voter_index in 1:n_voters
+  @threads :static for voter_index in 1:n_voters
     thread_id = threadid()
     this_sample = @view sample[:, thread_id]
     cohort_index = 0
@@ -215,10 +216,8 @@ function rejection_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
       utility = Utility{N,T}(this_sample)
       offset = 0
       failed = false
-      for issue in vote # better praxis would be to wrap this into a smaller function..
+      for (issue, interval) in iterate_issues(vote) # better praxis would be to wrap this into a smaller function..
         ranking = issue.choices[voter_index]
-        interval = (offset+1):(offset+issue.n_candidates)
-        offset += issue.n_candidates # non-overlapping
         satisfaction = obeys_ranking(utility, ranking, indif, interval)
         if !satisfaction # && break
           failed = true
@@ -234,4 +233,36 @@ function rejection_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
     voters[voter_index] = realization
   end
   sum(n_failures)
+end
+
+
+function iterate_issues(vote::MultiIssueVote)
+  offset = 0
+  Iterators.map(vote) do issue
+    interval = (offset+1):(offset+issue.n_candidates)
+    offset += issue.n_candidates # non-overlapping
+    (issue, interval)
+  end
+end
+
+
+function center_voter_utility(vote::MultiIssueVote, utility::Utility{N,T}
+    )::SVector{N,T} where {N,T}
+  normalized = @MVector zeros(T, N)
+  for (issue, interval) in iterate_issues(vote)
+    slice = @view utility[interval]
+    center, scatter = mean(slice), std(slice)
+    for index in interval
+      normalized[index] = (utility[index] - center) / scatter
+    end
+  end
+  normalized
+end
+
+function center_cohort(cohort::VoterCohort{N,T,L}) where {N,T,L}
+  center = mean(cohort) |> mean
+  scatter = cov(cohort) |> eigvals |> maximum
+  VoterCohort{N,T,L}(
+    (mean(cohort) .- center) ./ sqrt(scatter),
+    cov(cohort) ./ scatter )
 end

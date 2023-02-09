@@ -66,18 +66,25 @@ function read_prm_file(filename, N, R)
       continue
     end
     filtered_choices = filter(choices) do choice
-      length(choice) > 0
+      length(choice) > 0 && !startswith(choice, "WI") # write-ins
     end
     candidates = map(filtered_choices) do choice
-      candidate_string =
-        split(split(choice, 'C')[2], '[')[1]
-      candidate = parse(Int, candidate_string)
+      candidate = 0
+      try
+        candidate_string =
+          split(split(choice, 'C')[end], '[')[begin]
+        candidate = parse(Int, candidate_string)
+      catch except
+        error("Couldn't parse `$choice`.")
+      end
       if candidate < 1 || candidate > N
-        println("Candidate number out of range: $candidate.")
+        error("Candidate number out of range: $candidate.")
       end
       candidate
     end
     n_choices = length(candidates)
+    n_choices == 0 && continue
+    @assert n_choices <= R
     padded_candidates = vcat(candidates, zeros(Int, R-n_choices))
     push!(rankings, RankedChoice{R}(padded_candidates))
   end
