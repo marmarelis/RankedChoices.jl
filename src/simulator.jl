@@ -104,9 +104,9 @@ end
 # what if I included rolling quantiles for each voter's utility?
 function simulate(prior::Prior{N,M,T}, simulation::Simulation,
     vote::Union{MultiIssueVote, IssueVote}, n_rounds::Int; seed::Int,
-    n_utility_moments::Int = 1, n_burnin::Int = 0, indifference::Bool = false,
-    verbose::Bool = false, gc_interval::Int = 0, do_coincident::Bool = true
-    )::NamedTuple where {N,M,T}
+    n_utility_moments::Int = 1, n_burnin::Int = 0, subsample_interval::Int = 1,
+    indifference::Bool = false, do_coincident::Bool = true,
+    verbose::Bool = false, gc_interval::Int = 0 )::NamedTuple where {N,M,T}
   L = N * N
   Random.seed!(seed)
   if vote isa IssueVote
@@ -140,12 +140,16 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
   coincident = ( do_coincident ?
     zeros(Int, n_voters, n_voters) : nothing )
   mixtures = VoterMixture{N,M,T}[]
+  log_likelihoods = T[]
   sim_status = nothing
   progress = Progress(n_total_rounds, enabled=verbose)
   for trial in 1:n_total_rounds
     stage = trial / n_total_rounds
     sim_status = simulate_utilities(simulation, sim_status,
       voters, vote, mixture, indifference, stage)
+    log_likelihood = mean(voters) do voter
+      voter_log_likelihood(voter, mixture)
+    end
     if trial <= n_burnin
       status = nothing # don't count them if still in burnin stage
     else
@@ -162,18 +166,21 @@ function simulate(prior::Prior{N,M,T}, simulation::Simulation,
     cohorts = sample_mixture_posteriors(voters; prior.precision_scale,
       prior.precision_dof, prior.mean_loc, prior.mean_scale)
     mixture = VoterMixture{N,M,T,L}(cohorts, shares)
-    push!(mixtures, mixture)
+    if trial > n_burnin && trial % subsample_interval == 0
+      push!(mixtures, mixture)
+      push!(log_likelihoods, log_likelihood)
+    end
     report = () -> [
       (:shares, shares .|> Float16),
       (:means, mean(mixture) .|> Float16),
       (:spreads, cov(mixture) |> diag .|> sqrt .|> Float16),
+      (:log_likelihood, log_likelihood),
       (:state, sim_status) ]
     next!(progress, showvalues=report)
     if gc_interval > 0 && trial % gc_interval == 0
       GC.gc(true) # full round to reorganize memory and avoid continuous swapping from fragmented objects in virtual memory?
     end
   end
-  sampled_mixtures = @view mixtures[(1+n_burnin):end]
   moments ./= n_rounds
-  (; mixtures=sampled_mixtures, coincident, moments, sim_status... )
+  (; mixtures, coincident, moments, log_likelihoods, sim_status... )
 end

@@ -236,6 +236,14 @@ function rejection_sample_utilities!(voters::Vector{VoterRealization{N,M,T}},
 end
 
 
+# the "complete data" log-likelihood for a single voter
+function voter_log_likelihood(voter::VoterRealization{N,M,T},
+    mixture::VoterMixture{N,M,T})::T where {N,M,T}
+  cohort = mixture.cohorts[voter.membership]
+  loglikelihood(cohort, voter.utility)
+end
+
+
 function iterate_issues(vote::MultiIssueVote)
   offset = 0
   Iterators.map(vote) do issue
