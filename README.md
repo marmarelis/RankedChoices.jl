@@ -40,7 +40,7 @@ simulation = HamiltonianSim(
   n_trajectories=1, collision_limit=128)
 
 result = simulate(prior, simulation, votes, n_trials,
-  n_burnin=10_000, seed=1337)
+  n_burnin=10_000, seed=1337, indifference=true)
 
 ```
 
